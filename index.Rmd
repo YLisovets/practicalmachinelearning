@@ -1,0 +1,123 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "YLisovets"
+date: '07/02/2021'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+For this project, we are given data from accelerometers on the belt, forearm, arm, and dumbell of 6 research study participants. Our training data consists of accelerometer data and a label identifying the quality of the activity the participant was doing. Our testing data consists of accelerometer data without the identifying label. Our goal is to predict the labels for the test set observations.
+
+
+## Getting and loading the data
+
+Training data can be found here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+Test data can be found here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for the project came from this source http://groupware.les.inf.puc-rio.br/har
+
+```{r, message=FALSE}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainUrl))
+testing  <- read.csv(url(testUrl))
+```
+
+## Data Exploration and Cleaning
+
+
+```{r, message=FALSE}
+dim(training)
+dim(testing)
+table(training$class)
+```
+
+Both created datasets have 160 variables.
+
+I am now going to reduce the number of features by removing variables with nearly zero variance, variables that are almost always NA, and variables that don’t make intuitive sense for prediction.
+
+In order to predict classes in the testing sample, I’ll need to use features that are non-zero in the testing data set. Typically, I’d stay away from the even looking at the testing data set so I’m not influenced by the contents in model fitting. However, since this is not a time series analysis, I feel that looking at the testing sample for non-zero data columns is not of major concern for finding a predictive model that fits well out of sample.
+
+```{r, message=FALSE}
+visdat::vis_miss(testing, warn_large_data = FALSE)
+```
+
+62.5 percent of the total data array are missing.
+
+```{r, message=FALSE}
+na_colnames <- sapply(names(testing), function(x) all(is.na(testing[,x])==TRUE))
+training <- training[, na_colnames == FALSE]
+testing <- testing[, na_colnames == FALSE]
+```
+
+Cleaning even further by removing the variables that are near-zero-variance
+
+
+```{r, message=FALSE}
+library(caret)
+NZV <- nearZeroVar(training)
+training <- training[, -NZV]
+testing  <- testing[, -NZV]
+```
+
+Now remove variables that don't make intuitive sense for prediction (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp), which happen to be the first five variables
+
+```{r, message=FALSE}
+training <- training[, -c(1:5)]
+testing <- testing[, -c(1:5)]
+```
+
+## Data Partitioning
+
+Since I’ll be predicting classes in the testing dataset, I’ll split the training data into training and testing partitions and use the pml-testing.csv as a validation sample. I’ll use cross validation within the training partition to improve the model fit and then do an out-of-sample test with the testing partition
+
+```{r, message=FALSE}
+inTrain <- createDataPartition(training$classe, p = 0.7, list = FALSE)
+trainData <- training[inTrain, ]
+testData <- training[-inTrain, ]
+```
+
+
+## Model Building
+
+For this project I will use random forests algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general. I will use 5-fold cross validation when applying the algorithm.
+
+```{r, message=FALSE}
+set.seed(12345)
+controlRF <- trainControl(method="cv", number=5, verboseIter=FALSE)
+modRF <- train(classe ~ ., data=trainData, method="rf", trControl=controlRF)
+modRF$finalModel
+predictRF <- predict(modRF, newdata=testData)
+cmrf <- confusionMatrix(predictRF, as.factor(testData$classe))
+cmrf
+plot(modRF)
+plot(cmrf$table, col = cmrf$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmrf$overall['Accuracy'], 4)))
+```
+
+Random Forests gave an Accuracy in the testData dataset of 99.88%, the expected out-of-sample error is 100-99.88 = 0.12%.
+
+## Prediction
+
+Now apply the model to the original testing data set downloaded from the data source.
+
+```{r, message=FALSE}
+testingPred <- predict(modRF, testing)
+testingPred
+```
+
+The Results output will be used to answer the “Course Project Prediction Quiz”
+
+## Conclusion
+
+Based on the data available, I am able to fit a reasonably sound model with a high degree of accuracy in predicting out of sample observations.
+
+The question I’m left with is around the data collection process. Why are there so many features in the testing sample that are missing for all 20 observations, but these have observations in the training sample?
+
+Despite these remaining questions on missing data in the samples, the random forest model with cross-validation produces a surprisingly accurate model that is sufficient for predictive analytics.
